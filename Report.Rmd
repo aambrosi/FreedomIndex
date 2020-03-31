@@ -1,0 +1,1114 @@
+---
+title: "Analysis of the Freedom Index dataset"
+author: "Andrea Ambrosi & Chiara Munari"
+date: "12 giugno 2019"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    number_sections: yes
+    theme: lumen
+    toc: yes
+---
+
+```{r,  message = FALSE, warning = FALSE}
+library(Hmisc)        #Library Hmisc imported for the usage of the function describe
+library(plotly)       #Library plotly imported for the generation of interactive graphs
+library(ggplot2)      #Library ggplot2 also imported for the generation of graphs
+library(class)        #Library imported to perform KNN classification
+library(ggcorrplot)   #Library ggcorrplot imported to draw the plot of the correlation matrix
+library(rworldmap)    #Library rworldmap imported to create chloroplet map
+library(RColorBrewer) #Library useful for plots
+library(scales)       #Library useful for plots
+devtools::install_github('vqv/ggbiplot')
+library(ggbiplot)     #Library imported to create a customized biplot 
+```
+
+# *Introduction*
+
+The aim of the current report is to explore the situation about human freedom around the world. 
+In order to do so, we exploited the dataset of 2016 Human Freedom Index found at the following link: https://www.kaggle.com/gsutters/the-human-freedom-index 
+
+The concept of freedom is extremely complex and its measurement involves several aspects of social life, ranging from freedom to trade, to use sound money (or similar economic activities), to  the right of civil liberties, such as freedom of speech, religion, association and assembly. 
+For this reason, the Human Freedom Index is calculated aggregating more than 80 indicators measuring different aspects of personal, civil and economic freedom. 
+To provide an accurate estimate of human freedom in various countries is a valuable resource that can help to raise awareness on dangerous situations or to uncover patterns and relationship between freedom and other social and economic phenomena.
+
+Nowadays, people from western countries usually think that freedom is broadly recognised and its higher level is already reached in the majority of countries of the world. Stereotypes tend to classify as "not free" countries the ones of Africa or Asia, while considering European and North American coutries reaching the best scores in human freedom ranking. This is not always true. Stereotypes provide a rough image of the reality, but to go deeper into that and to depict it better is is necessary to go beyond semplifications.
+
+Our purpose in this report is to perform an accurate explorative analysis of the data about the freedom index for the years from 2008 to 2016, highlighting the most interesting features in the dataset. Moreover, we performed some classification analysis using various techniques (KNN, k-means clustering and hierarchical clustering), to uncover remarkable patterns or subgroups of the data.
+
+
+# *Description of the dataset*
+
+The original dataset has 1458 observations and 123 features. 
+The data were collected on 162 countries every year from 2008 to 2016. The majority of features are indicators of differents aspects of freedom.
+
+By looking closely at the data, we discover an underlying hierarchical structure. Many variables results from the mean of few other variables of a "lower" level: i.e. "pf_rol" (personal_freedom/rule_of_law) is the mean of the corresponding values of "pf_rol_civil", "pf_rol_criminal" and "pf_rol_procedural".
+
+
+```{r, warning = FALSE}
+data <- read.csv("./hfi_cc_2018.csv", sep = ",", header = TRUE)
+originalData <- data #Keep an original data snapshot for future usage 
+dim(data) #1458 x 123
+data 
+```
+
+# *Data cleaning*
+
+By looking at the summary of the data and performing some initial visual explorations it is possible to note that there is a big number of missing values. These comes from the recent inclusion of some countries in the calculation of the freedom index. States like Iraq, Sudan and Belarus have data recorded only for 2016. 18 other countries has missing data corresponding to two or more years. For this reason and because they are only a small fraction of the countries involved, we decided to drop all the data about these countries from the dataset. 
+
+```{r, warning = FALSE}
+#drop countries to reduce NA
+data <- data[
+     data$ISO_code != "TJK" &  data$ISO_code != "BLR" & data$ISO_code != "SUR" &  data$ISO_code != "IRQ" & 
+     data$ISO_code != "LBY" &  data$ISO_code != "LBN" & data$ISO_code != "QAT" &  data$ISO_code != "SAU" &
+     data$ISO_code != "YEM" &  data$ISO_code != "LAO" & data$ISO_code != "BTN" &  data$ISO_code != "BRN" &
+     data$ISO_code != "KHM" &  data$ISO_code != "TLS" & data$ISO_code != "SDN" &  data$ISO_code != "LBR" &
+     data$ISO_code != "GMB" &  data$ISO_code != "SWZ" & data$ISO_code != "GIN" &  data$ISO_code != "SYC" &
+     data$ISO_code != "CPV", ]
+```
+
+In addiction, many variables of "lower" levels (i.e. 3+ levels: "pf_rol_procedure", "pf_ss_women_missing", "pf_religion_estop_establish" etc) present a lot of NA. Due to the inherent hierarchical structure of the variables the information of the different levels tends to be redundant. We decided to select only few variables from all those present in the dataset, the ones of major interest. 
+The variable "pf_association" has been dropped due to the high number of NA and the consequent difficulties in performing analysis.
+With this operation we dropped many of the remaining NA values. 
+
+The features selected indicates the year which the data refers to, the name of the country, the maxi-region which every country belongs to. 
+A group of features indicates the value (in a range from 0 to 10) corresponding to specific areas of personal and economic freedom (these are listed in the code below). The last three variables are personal and economic score (calculated as the means of the respective variables) and the human freedom score, mean of economic and personal score.
+The variables "pf_rank", "ef_rank", "hf_rank" and "hf_quartile" have been omitted due to the reduncancy of the information they provide and the easy way to reproduce them, if necessary.
+
+```{r, warning = FALSE}
+ISO_code <- data$ISO_code # usefult to build the chloroplet map
+data     <- subset(data, 
+               select = c("year",            # Year of the collection (2008 - 2016)
+                          "countries",       # Name of the country    (#162)
+                          "region",          # Region of the world    (#10)  
+                          "pf_rol",          # Rule of law
+                          "pf_ss",           # Security and safety
+                          "pf_movement",     # Movement
+                          "pf_religion",     # Religion
+                          "pf_expression",   # Expression and information
+                          "pf_identity",     # Identity and relationships
+                          "ef_government",   # Size of government
+                          "ef_legal",        # Legal system and property rights
+                          "ef_money",        # Access to sound money
+                          "ef_trade",        # Freedom to trade internationally
+                          "ef_regulation",   # Regulation of credit labor and business
+                          "pf_score",        # Personal freedom final score
+                          "ef_score",        # Economic freedom final score
+                          "hf_score"         # Human freedom final score
+                          )
+               )
+
+# describe(data)
+```
+
+In the dataset there are still two NA: both are in the "ef_money" column of Iran, corresponding to year 2014 and 2015. We decided to replace these values with the mean of all the others values of "ef_money" of Iran for the remaining years. 
+
+```{r, warning = FALSE}
+# two last NA, replaced by mean value of the column ef_money of that country (Iran)
+data[344,]$ef_money <- 7.44
+data[203,]$ef_money <- 7.44
+```
+
+To conclude the data cleaning process, we controlled the type of variables, to ensure that all personal_freedom and economic_freedom variables are numeric and within the range 0-10.
+
+```{r, warning = FALSE}
+# save a copy of the cleaned dataset
+originalData <- data
+
+# check data structure, controlling for the type of variables
+str(data)
+#summary(data)
+```
+
+At the end of the data cleaning we have a dataset without missing values. The cleaned observations are 1269 and the variables chosen are 17.
+
+# *Explorative analysis*
+
+The following step is to perform an explorative analysis of the cleaned dataset. Having a deep knowledge of the distribution of the variables is the foundation of a good analytical process. We want to understand better how the variables changes among regions, countries and years.
+
+## *Variables description*
+
+After the paragraph on data cleaning, where some variables and some country records have been removed, we see how the remaining variables are distributed. For every feature we indicate few indicative parameters: the minimum value, the maximum, the mean and the standard deviation. These are key points to understand future analysis.
+
+We represented every variable with an interactive histogram that describe its distribution among states. The bar below every histogram enables the reader to navigate through years, to discover changes in the allocation of the variable.
+
+
+### *Personal freedom*
+
+* Rule of law:  
+  The variable is evenly distributed between a minimum of 1.8 and a max of 8.7 with a mean of 5.7 and a SD of 1.5.The variability of data from 2008 to 2016 shows an increase, including values from 3 to 0 that in 2008 weren't represented.
+
+* Security and safety:  
+  The variable is evenly distributed between a minimum of 4.2 and a max of 9.9 with a mean of 8.2 and a SD of 1.4. During the years the proportion of countries with an high level of this variable increases.
+
+* Movement:  
+  The variable is distributed almost as a categorical variable with 7 different classes. It can take values from 0 to 10 with a mean of 7.9 and a SD of 2.5.
+
+* Religion:  
+  The variable is evenly distributed between a minimum of 3.7 and a max of 10 with a mean of 7.9 and a SD of 1.3. There is a decline of the distribution of personal freedom related to religion in the last few years. 
+
+* Expression and information:  
+  The variable is evenly distributed between a minimum of 0.2 and a max of 9.8 with a mean of 7-9 and a SD of 1.4. The distribution goes sligthly better through years.
+
+* Identity and relationship:  
+  The variable is distributed more like a categorical variable than the others with 29 different values. It can take values from 0 to 10 with a mean of 7.6 and a SD of 3.
+
+* Personal freedom score:  
+  The variable is evenly distributed between a minimum of 2.5 and a max of 9.6 with a mean of 7.3 and a SD of 1.3. All variables involved in the determination of personal freedom tend to be centered in the higher half of the range 0-10. The exceptions are the "Identity and Relationship" and "Movement" variables that are quite homogeneously distributed over all the range 0-10.
+
+```{r, warning = FALSE, fig.height = 8}
+#summary(data$pf_rol)
+#sd(data$pf_rol)
+pf1 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_rol, 
+    frame      = ~year,
+    name       = "Rule of law",
+    type       = 'histogram')
+
+#summary(data$pf_ss)
+#sd(data$pf_ss)
+pf2 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_ss, 
+    frame      = ~year,
+    name       = "Security and safety",
+    type       = 'histogram')
+
+#summary(data$pf_movement)
+#(data$pf_movement)
+pf3 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_movement, 
+    frame      = ~year,
+    name       = "Movement",
+    type       = 'histogram')
+
+#summary(data$pf_religion)
+#sd(data$pf_religion)
+pf4 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_religion, 
+    frame      = ~year,
+    name       = "Religion",
+    type       = 'histogram')
+
+#summary(data$pf_expression)
+#sd(data$pf_expression)
+pf5 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_expression, 
+    frame      = ~year,
+    name       = "Expression and information",
+    type       = 'histogram')
+
+#summary(data$pf_identity)
+#sd(data$pf_identity)
+pf6 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_identity, 
+    frame      = ~year,
+    name       = "Identity and relationship",
+    type       = 'histogram')
+
+#summary(data$pf_score)
+#sd(data$pf_score)
+pf7 <- plot_ly(
+    data       = originalData,
+    x          = ~pf_score, 
+    frame      = ~year,
+    name       = "Personal freedom score",
+    type       = 'histogram') %>%
+  layout(title = 'Distribution of personal freedom variables (from 2008 to 2016)',
+         xaxis = list(title = ""), 
+         yaxis = list(title = "Observations"))
+
+subplot(pf1, pf2, pf3, pf4, pf5, pf6, pf7, nrows = 7, shareX = TRUE)
+```
+
+
+### *Economic freedom*
+
+
+* Size of government:  
+  The variable is evenly distributed between a minimum of 3.2 and a max of 9.5 with a mean of 6.4 and a SD of 1.3.
+
+* Legal system and property rights:  
+  The variable is evenly distributed between a minimum of 1.4 and a max of 8.9 with a mean of 5.3 and a SD of 1.6.
+
+* Access to sound money:  
+  The variable is distributed between a minimum of 0.9 and a max of 9.9 with a mean of 8.1 and a SD of 1.4. Most of the observations are centered in the higher half of the range 0-10.
+
+* Freedom to trade internationally:  
+  The variable is evenly distributed between a minimum of 1.8 and a max of 9.6 with a mean of 7.1 and a SD of 1.1. The distribution moves slightly to right (higher levels) through years.
+
+* Regulation of credit labor and business:  
+  The variable is evenly distributed between a minimum of 2.5 and a max of 9.4 with a mean of 7 and a SD of 1. It remains quite similar during years.
+
+* Economic freedom score:  
+  The variable is evenly distributed between a minimum of 2.9 and a max of 9.2 with a mean of 6.8 and a SD of 0.9. It approximates quite well a normal distribution, besides for few outliers.
+  
+```{r, warning = FALSE, fig.height = 8}
+#summary(data$ef_government)
+#sd(data$ef_government)
+ef1 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_government, 
+    frame      = ~year,
+    name       = "Size of government",
+    type       = 'histogram')
+
+#summary(data$ef_legal)
+#sd(data$ef_legal)
+ef2 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_legal, 
+    frame      = ~year,
+    name       = "Legal system and property rights",
+    type       = 'histogram')
+
+#summary(data$ef_money)
+#sd(data$ef_money)
+ef3 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_money, 
+    frame      = ~year,
+    name       = "Access to sound money",
+    type       = 'histogram')
+
+#summary(data$ef_trade)
+#sd(data$ef_trade)
+ef4 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_trade, 
+    frame      = ~year,
+    name       = "Freedom to trade internationally",
+    type       = 'histogram')
+
+#summary(data$ef_regulation)
+#sd(data$ef_regulation)
+ef5 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_regulation, 
+    frame      = ~year,
+    name       = "Regulation of credit labor and business",
+    type       = 'histogram')
+
+#summary(data$ef_score)
+#sd(data$ef_score)
+ef6 <- plot_ly(
+    data       = originalData,
+    x          = ~ef_score, 
+    frame      = ~year,
+    name       = "Economic freedom score",
+    type       = 'histogram') %>%
+  layout(title = 'Distribution of economic freedom variables (from 2008 to 2016)',
+         xaxis = list(title = ""), 
+         yaxis = list(title = "Observations"),
+         showlegend = TRUE)
+
+subplot(ef1, ef2, ef3, ef4, ef5, ef6, nrows = 6, shareX = TRUE)
+```
+
+
+### *Human freedom*
+
+The variable is evenly distributed between a minimum of 3.8 and a max of 9.1 with a mean of 7.1 and a SD of 1. Most of the data of the distribution moves to right, indicating an increase in the human freedom score across years, from 2008 to 2016. Few countries instead move to lower levels of human freedom and contribute to enhance the variability of the distribution of the last few years.
+
+```{r, warning = FALSE, fig.height = 5}
+#summary(data$hf_score)
+#sd(data$hf_score)
+plot_ly(
+    data       = originalData,
+    x          = ~hf_score, 
+    frame      = ~year,
+    type       = 'histogram') %>%
+  layout(title = 'Distribution (from 2008 to 2016)',
+         xaxis = list(title = "Human freedom score"), 
+         yaxis = list(title = "Observations"),
+         showlegend = FALSE)
+```
+
+
+
+## *Data visualization*
+
+To better understand how the human freedom is distributed all around the world, the chloroplet map displays how much every country is free (economically and personally).
+Starting from the lowest values (in red) it is possible to see those countries where the freedom is strongly restricted. As we move to the green, there are more and more countries that are indexed as free than the others. 
+In white the countries that are not considered in this study (due to missing values or because they have been cutted out in the data cleaning process).
+
+```{r, warning = FALSE, echo=FALSE}
+freedom_map <- originalData[, c("countries", "hf_score")]
+freedom_map <- aggregate(hf_score ~ ISO_code, freedom_map, sum)
+gtdMap <- joinCountryData2Map(freedom_map, 
+                              nameJoinColumn = "ISO_code", 
+                              joinCode       = "NAME")
+mapCountryData(gtdMap, 
+               nameColumnToPlot  = 'hf_score', 
+               mapTitle          = "Human freedom score",
+               catMethod         = 'fixedWidth', 
+               oceanCol          = "#87b5ff",
+               numCats           = 40, 
+               colourPalette     = c("red", "yellow", "darkgreen"), 
+               missingCountryCol = "white")
+#A country is missing --> French Giana
+```
+
+A second useful visualization of the data is provided below. The values of the human freedom score of every country is plotted over a two dimensional plane given by "personal_freedom_score" and "economic_freedom_score". It can be seen as the human freedom value is be formed by different proportion of the two components. The interactive plot enable the reader to go through the representation of the data on different years.
+
+```{r, warning = FALSE}
+hover_text <- paste("Region:          ", originalData$region, 
+                    "\nCountry:       ", originalData$countries, 
+                    "\nFreedom value: ", round(originalData$hf_score, 2), sep="")
+plot_ly(
+    data      = originalData,
+    x         = ~pf_score, 
+    y         = ~ef_score, 
+    color     = ~region, 
+    size      = .5,
+    frame     = ~year, 
+    text      = hover_text, 
+    hoverinfo = "text",
+    type      = 'scatter',
+    mode      = 'markers'
+  ) %>%
+  layout(title = 'Freedom distribution (2008 to 2016)',
+         xaxis = list(title = "Personal freedom score"), 
+         yaxis = list(title = "Economic freedom score"))
+```
+
+Another interesting point of view is to consider the distribution of the human freedom scores among different regions of the world. There are some regions where the variability among states is very low (i.e. Western Europe and North America) and other regions where there are very different values (i.e. Middle East and North Africa).
+
+```{r, warning = FALSE}
+#Hover informations to print on the interactive boxplot
+hover_text <- paste("Region:          ", originalData$region, 
+                    "\nCountry:       ", originalData$countries, 
+                    "\nYear:          ", originalData$year, 
+                    "\nFreedom value: ", round(originalData$hf_score, 2), sep="")
+
+plot_ly(originalData, 
+        x         = ~region, 
+        y         = ~hf_score, 
+        type      = "box", 
+        text      = hover_text, 
+        hoverinfo = "text", 
+        color     = ~region)%>%
+  layout(title = 'Freedom distribution by region',
+         xaxis = list(title = "",
+                      tickvals = "",
+                      ticktext = ""),
+         yaxis = list(title = "Human freedom score"),
+         legend = list(orientation = 'h'))
+```
+
+It is worth of notice the trend followed by the mean of human freedom values for every region during years. Western Europe value sligthly decrease while East Asia freedom score value increase a little.
+
+```{r, warning = FALSE}
+# see how changes freedom index per region during years
+freedomXregionData <- aggregate(hf_score ~ region + year, originalData, mean)
+freedomXregion     <- plot_ly()
+for(reg in unique(freedomXregionData$region)) {  
+  freedomXregion <- add_trace(p        = freedomXregion, 
+                              data     = freedomXregionData[freedomXregionData$region == reg, ],  
+                              x        = ~year, 
+                              y        = ~hf_score, 
+                              name     = reg, 
+                              type     = 'scatter', 
+                              mode     = 'lines+markers', 
+                              evaluate = TRUE
+                              )%>%
+  layout(title = 'Average freedom per year by region',
+         xaxis = list(title = ""),
+         yaxis = list(title = "Human freedom score"),
+         legend = list(orientation = 'h'))    
+}
+freedomXregion
+```
+
+To conclude this data exploration section, the two correlograms of the variables that determines economic freedom score and the ones that creates the personal freedom score are showed. 
+
+Except for the "personal_freedom_score" variable that is, as expected, highly correlated with the other variables, other correlations can be noticed. "pf_ss" and "pf_rol" present a correlation of 0.7. This is in line with common sense expectation regarding these two variables, because they measure aspects widely recognised as interconnected with each others.
+
+```{r, warning = FALSE, fig.height=5, fig.width=5}
+
+# Correlation matrix personal freedom
+corr <- round(cor(data[,c(4,5,6,7,8,9,15)]), 1)
+#corr
+
+# Plot
+ggcorrplot(corr, hc.order = TRUE, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method="circle", 
+           colors = c("tomato2", "white", "springgreen3"), 
+           title="Correlogram of personal freedom", 
+           ggtheme=theme_bw)
+```
+
+The correlogram regarding economic freedom shows that "ef_money" and "ef_trade" are highly correlated (0.8) and that the only variable that has a very low correlation with the others is "ef_regulation".
+
+```{r, warning = FALSE, fig.height=4, fig.width=5}
+
+corr <- round(cor(data[,c(10,11,12,13,14,16)]), 1)
+
+ggcorrplot(corr, hc.order = TRUE, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method="circle", 
+           colors = c("tomato2", "white", "springgreen3"), 
+           title="Correlogram of economic freedom", 
+           ggtheme=theme_bw)
+```
+
+
+## *PCA*
+
+Principal Component Analysis is an unsupervised learning method useful to perform dimensionality reduction on datasets with a high number of variables.
+Principal components allows to summarise the set of current variables in a set with a smaller number of variables. This explains most of the variability of the original dataset. 
+This method allows you to represent the entire dataset by projecting the data in a plane given by the first two principal components(or a three-dimensional space formed by the first three principal components). PCA enable us to visualize the data in a two(or three)-dimensional way.
+
+To perform PCA we selected the quantitative variables of interest (listed in the code chunk below).
+
+```{r, warning = FALSE}
+data <- subset(originalData, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation"))
+```
+
+Before to run PCA, a quick examination of the data has to be done. We need to control the values of mean and variance. If means are very different from each others or variances vary too much among variables (probably because of different scales of the data), it is usually the case to rescale the variables to have mean 0 and/or standard deviation  1. We are not going to rescale them now because our variables are already represented with the same scale (0-10).
+
+* Mean:
+```{r, warning = FALSE}
+# quick examination of the data
+# -> mean
+apply(data, 2, mean)
+```
+
+
+* Variance:
+```{r, warning = FALSE}
+# -> variance
+apply(data, 2, var)
+```
+
+The results of the calculation of the principal component are showed below. 
+We can see that the first loading vector places approximately equal weight on a group of few variables (pf_rol, ef_legal, ef_trade), followed quite closely by another subgroup of variables (ef_money, pf_ss, pf_expression, ef_regulation, pf_movement). The second loading vector places most of its weight on pf_religion, followed by pf_movement and pf_expression. The third loading vector instead present high weight corresponding to ef_government variable.
+
+```{r, warning = FALSE}
+pr_out = prcomp(data, scale = TRUE)
+pr_out$rotation[,1:3]
+```
+
+To decide how many principal component to use for the data visualization we now look at the proportion of variance explained by each of them. As we can see the first principal component is responsible for the explanation of the 49% of variance, the second component adress the 13% of the variance, and the third one the 10%. 
+
+```{r, warning = FALSE}
+# to see standard deviation, proportion and cumulative variance explained
+summary(pr_out)
+```
+
+We perform PCA with another method, to see if there is any variance in the results, and if that is the case, to compare them to choose the best one.
+The main discriminant to take this decision is the proportion of variance explained by the first two or three principal compoments: the more the better.
+
+As it is possible to notice from the results, the second method produce slightly different principal components. The first loading vector places most of its weight on pf_identity and pf_movement, followed by ef_legal and pf_expression. The second loading vectors place much weight on pf_identity, ef_legal and pf_rol. The third one has high weight values on pf_movement and pf_identity. 
+
+```{r, warning = FALSE}
+# second method
+pr_out2 = princomp(data, cor = FALSE, scores = TRUE)
+pr_out2$loadings[,1:3]
+```
+
+When considering the proportion of variance explained by each component, it can be seen that the first principal component explain the 54% of the variability of the entire dataset, the second principal component explain the 14% and the third one 10%.
+
+```{r, warning = FALSE}
+summary(pr_out2)
+```
+
+Let's look at the scree plot of the variance explained by the principal components generated by both methods:
+
+```{r, warning = FALSE}
+# variance explained by every principal component - method 1 -
+pr.var = pr_out$sdev^2
+# proportion of variance explained by every principal component - method 1 -
+pve1 <- pr.var/sum(pr.var)
+
+# variance explained by every principal component - method 2 -
+pr.var = pr_out2$sdev^2
+# proportion of variance explained by every principal component - method 2 -
+pve2 <- pr.var/sum(pr.var)
+
+# plot of proportion of variance explained
+prop_var_expl <- pve1
+trace_1 <- pve2
+principal_components <- c(1:11)
+
+data <- data.frame(principal_components, prop_var_expl, trace_1)
+
+plot_ly(data, x = ~principal_components, y = ~prop_var_expl, name = 'prcomp()', type = 'scatter', mode = 'lines+markers') %>%
+  add_trace(y = ~trace_1, name = 'princomp()', mode = 'lines+markers')%>%
+  layout(title = 'Proportion of variance explained',
+         xaxis = list(title = "Principal Components"),
+         yaxis = list(title = "Variance Explained"))
+```
+
+The plot above underlines as the first few principal components produced by the second method ("princomp()" function) explain a sligthly greater proportion of variability with respect to the component generated by the first method ("prcomp()" function).
+
+Now we try to visualize the dataset using the first two principal components:
+
+```{r, warning = FALSE}
+
+ggbiplot(pr_out2, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE) + labs (title = "PCA")
+```
+
+Due to some difficulties in visualizing and interpreting the data in this way, we decided to split the dataset into six macro-regions. In addition, we decided to insert only the data of 2016.
+Then, performing pca in all of them, it is possible to have a clearer visual representation of the data.
+
+First of all we create a subset of the european countries, grouping together the two regions of "Western Europe" and "Eastern Europe". 
+By considering the loading vectors of the principal component analysis of the europe subset, it is possible to say that the first loading vector place most of its weight on pf_rol variable, followed by ef_legal and pf_movement. The second loading vector place weight mostly on pf_movement and ef_government.
+From these premises it is possible to draw some hypothesis on the freedom in some countries: Russia, for example, is placed in the high-left corner of the plot. This can be read as follows: we expect from Russia to have low levels of pf_movement, ef_legal, and pf_rol as supported by both the principal components loading vectors.
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 7}
+
+data <- subset(originalData, select = c("region", "countries", "year", "pf_rol", "pf_ss", "pf_movement", "pf_religion","pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation"))
+
+# Europe
+europe_pca <- data[data$region == "Western Europe"  | 
+                   data$region == "Eastern Europe", ]
+europe_pca    <- europe_pca[europe_pca$year == 2016, ]
+countr_europe <- europe_pca$countries
+europe_pca    <- subset(europe_pca, select = -c(region, year, countries))
+pr_out_europe <- princomp(europe_pca)
+
+#pr_out_europe
+ggbiplot(pr_out_europe, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE, labels = countr_europe) + 
+  labs(title = "Europe")
+```
+
+Then we grouped together the 3 Asian regions: East Asia, South Asia and the region of Caucasus & Central Asia. Looking at the length and the directions of the most important variables in both the components, it comes out that the pf_identity and pf_movement are very important for both the components followed by pf_expression and pf_religion in the second pc.
+From these premises we can say for example that countries like China or Vietnam will have a low value of freedom mostly due to the low values of the movement, religion and expression indicators and countries like Bangladesh or Sri Lanka will charge this low value mostly to the identity one.
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 7}
+
+# Caucasus and Asia
+asia_pca <- data[data$region == "East Asia"  | 
+                 data$region == "South Asia" | 
+                 data$region == "Caucasus & Central Asia", ]
+asia_pca    <- asia_pca[asia_pca$year == 2016, ]
+countr_asia <- asia_pca$countries
+asia_pca    <- subset(asia_pca, select = -c(region, year, countries))
+pr_out_asia <- princomp(asia_pca)
+
+#pr_out_es_asia
+ggbiplot(pr_out_asia, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE, labels = countr_asia) + 
+  labs(title = "Asia")
+```
+
+For the American region we linked the North America to the Latin America & Caribbean region. Here the first component is highly explained by ef_money, ef_legal and ef_regulation while the second component is explained by pf_identity and ef_government for the major part. In respect to the Asian region, here we can see that the variance is explained more by the eonomical sphere rather than the personal one.
+Venezuela for example is at the opposite of more or less all the arrows drawn by the pc so the value of freedom is surely low, while Argentina has on one side low values of ef_government and ef_money but on the other side has an extremely high value of pf_identity that brings the value higher than others.
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 7}
+
+# North and Latin America
+america_pca <- data[data$region == "North America" | 
+                    data$region == "Latin America & the Caribbean",]
+america_pca    <- america_pca[america_pca$year == 2016, ]
+countr_america <- america_pca$countries
+america_pca    <- subset(america_pca, select = -c(region, year, countries))
+pr_out_america <- princomp(america_pca)
+
+#pr_out_america
+ggbiplot(pr_out_america, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE, labels = countr_america) + 
+  labs(title = "America")
+```
+
+As regards to Africa we grouped the Middle East and all the African regions. There are 2 values that stand out both in the first and in the second component: pf_identity and pf_movement. Countries like South Africa, Ghana or Zimbawe can address to these indicators the high level of freedom (compared to the others African countries) while on the opposite these are strong indicator also for the low level of freedom we encounter in countries like Syria, Iran or Egypt.
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 7}
+
+# Africa and Middle East
+africa_pca <- data[data$region == "Middle East & North Africa" | 
+                   data$region == "Sub-Saharan Africa", ]
+africa_pca    <- africa_pca[africa_pca$year == 2016, ]
+countr_africa <- africa_pca$countries
+africa_pca    <- subset(africa_pca, select = -c(region, year, countries))
+pr_out_africa <- princomp(africa_pca)
+
+#pr_out_africa
+ggbiplot(pr_out_africa, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE, labels = countr_africa) + 
+  labs(title = "Africa")
+```
+
+At the end we have the smallest region: Oceania. Here we had to change method for drawing the components because in this case the number of variables is higher than the number of countries and the princomp method doesn't work. Nevertheless, here the first component is driven by ef_legal, pf_rol and ef_money while for the second component we have pf_identity and pf_movement that guide the freedom level. The first component explain the 82% of the variance: in fact thanks to ef_money, pf_rol and ef_legal we can explain pretty well the freedom level for this region.
+
+```{r, warning = FALSE, fig.height = 5, fig.width = 7}
+
+# Oceania
+oceania_pca    <- data[data$region == "Oceania", ]
+oceania_pca    <- oceania_pca[oceania_pca$year == 2016, ]
+countr_oceania <- oceania_pca$countries
+oceania_pca    <- subset(oceania_pca, select = -c(region, year, countries))
+
+# princomp method does not work with m < p (less obs than variables)
+# for Oceania we use prcomp() method
+
+pr_out_oceania <- prcomp(oceania_pca)
+#pr_out_oceania
+ggbiplot(pr_out_oceania, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE, labels = countr_oceania) + 
+  labs(title = "Oceania")
+```
+
+# *Classification*
+
+Classification analysis is performed in order to assign each observation to a specific class that somehow represent the main features of the observation itself. It is a useful methodology to uncover subgroups of observations within a certain dataset.
+
+## *KNN*
+KNN is an algotithm used to make predictions. It works differently compared to the methods used for predictions like logistic regression, LDA or QDA where it is necessary first to fit the model and then use it to make prediction. 
+First of all we need to clean the data (a bit more in respect to the data cleaning part). We want to do this because in KNN analysis is possible to use only numeric variables. The reason is that KNN will calculate the Euclidean distance between each observation in order to draw the clusters.
+
+```{r, warning = FALSE}
+data <- subset(originalData, select = c("year", "pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation", "ef_score","pf_score","hf_score"))
+```
+
+Then, in order to have a class prediction, we divided the human score into 3 classes: below 6.5, between 6.5 and 8 and over 8 that corresponds to a low, medium and high level of freedom.
+
+```{r, warning = FALSE}
+data$class[data$hf_score < 6.5] <- "low"
+data$class[data$hf_score < 8 & data$hf_score >= 6.5] <- "medium"
+data$class[data$hf_score >= 8] <- "high"
+```
+
+To make prediction we need a last step. Since we have a time series dataset, we cannot randomly split the dataset and use a part for the train and another part for the test of the model because we cannot use data of 2015 to predict values of 2009. For this reason we splitted the dataset only in one point where the data are before or after 2016 and we will use the ones before 2016 for training and the others for testing.
+
+```{r, warning = FALSE}
+train       <- data[data$year <  2016, ]
+class.train <- train$class
+train       <- subset(train, select = -c(class, year, ef_score, pf_score))
+
+test        <- data[data$year == 2016,]
+
+#used below for the plots
+plot_score  <- subset(test,  select = c(ef_score, pf_score))
+
+class.test  <- test$class
+test        <- subset(test,  select = -c(class, year, ef_score, pf_score))
+```
+
+After this setup we can start with the algorithm. 
+The first try is with K = 1. The algorithm will place all the observations on a hyperplane and when a new one will arrive, it will give to it as result the class of the nearest observation.
+
+```{r, warning = FALSE}
+set.seed(1)
+pred1 <- knn(train, test, class.train, k = 1)
+#table(knn.pred, class.test)
+```
+
+The error resulting with K = 1 is:
+
+```{r}
+mean(pred1 != class.test)
+```
+
+and the correct predictions are:
+
+```{r}
+mean(pred1 == class.test)
+```
+
+that it's already quite good but we can try to improve it varying the K.
+
+The chunk below vary the K parameter from 1 to $\frac{1}{3}$ of the observations of the dataset always with the same train and test set and at the end draw a graph where we see the progression of the results with the variations of K.
+
+```{r, warning = FALSE}
+res <- NULL
+for (i in (1:((nrow(train))/3))){
+  set.seed(1)
+  knn.pred <- knn(train, test, class.train, k = i)
+  res[i] <- mean(knn.pred != class.test)
+}
+
+errorK <- ggplot(data = data.frame(res), aes(y = res, x = 1:length(res), colour = res)) + 
+  geom_point() + labs(x = "K parameter", y = "Error rate", title = "Variation of the error for an increasing value of K", colour = "Error rate")
+mytext <- paste("K = ", 1:length(res), "\n" , "Error = ", round(res*100, digits = 2), "%",  sep="")    
+plotly_errorK <- plotly_build(errorK)   
+style(plotly_errorK, text=mytext, hoverinfo = "text")
+
+```
+
+Looking at the plot it is possible to see that with K = 1 we are already in the best solution so as we go on increasing K the result would be worst than in the first case and this might be ascribed to the dataset structure. With a low value of K we maintain the best flexibility and a low bias.
+
+Finally we can compare the results between K = 1, K = 100 and the true values of the dataset classes.
+
+```{r}
+set.seed(1)
+pred100 <- knn(train, test, class.train, k = 100)
+#mean(pred1 == class.test)
+#mean(pred100 == class.test)
+
+d <- data.frame("Method"   = factor(c(rep("K = 1",       141), 
+                                      rep("True values", 141), 
+                                      rep("K = 100",     141)), 
+                                    levels = c("K = 1", "True values", "K = 100")),
+                "ef_score" = c(plot_score$ef_score, plot_score$ef_score, plot_score$ef_score), 
+                "pf_score" = c(plot_score$pf_score, plot_score$pf_score, plot_score$pf_score), 
+                "res"      = c(pred1, class.test, pred100))
+
+d$res[d$res == 3] <- "medium"
+d$res[d$res == 2] <- "low"
+d$res[d$res == 1] <- "high"
+
+plot_ly(data = d,
+        x = ~pf_score,
+        y = ~ef_score,
+        color = ~res,
+        frame = ~Method,
+        type  = "scatter",
+        mode  = "markers")%>%
+  layout(title = 'Variation between different K',
+         xaxis = list(title = "Personal freedom score"),
+         yaxis = list(title = "Economic freedomscore"))
+```
+
+With K = 1 we had a correct response in the 96% of the cases, while with K = 100 the correct answers drop to 89%. This highligths the fact that with our dataset we need a model that is extremely flexible due to the fact that the boundaries are not well cutted and this bring down the results when we consider more than one neighbour.
+
+## *K-Means Clustering*
+
+K- means clustering is one of the two most widely used type of clustering. This is an unsupervised statistical learning method that, given as input a specific dataset with quantitative variables, and a number k of group into which divide the observations, perform an iterative analysis in order to assign each observation to its cluster. The choice of k has a great importance and it can be a good idea to try more than one value and then compare the result and choose which one give the best outcomes.
+
+The k-means clustering is performed on data of 2008, 2012 and 2016 to see if there are major changes or trends in the subgroups.
+
+In order to visualize the results of the cluster analysis, we first perform pca on data and then use the principal components as variables in the cluster analysis.
+
+```{r, warning = FALSE}
+set.seed(1)
+
+# subset of 2008
+data <- originalData
+freedom_pca <- data[data$year == 2008, ]
+freedom_pca <- subset(freedom_pca, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+#dim(freedom_pca) # 141,11
+
+pr_out2 = princomp(freedom_pca, cor = FALSE, scores = TRUE)
+# first two principal components
+comp2 <- as.data.frame(pr_out2$scores[, 1:2])
+#dim(comp2) # 11,2
+
+# subset of 2012
+data <- originalData
+freedom_pca2 <- data[data$year == 2012, ]
+freedom_pca2 <- subset(freedom_pca2, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+pr_out22 = princomp(freedom_pca2, cor = FALSE, scores = TRUE)
+# first two principal components
+comp22 <- as.data.frame(pr_out22$scores[, 1:2])
+
+# subset of 2016
+data <- originalData
+freedom_pca3 <- data[data$year == 2016, ]
+freedom_pca3 <- subset(freedom_pca3, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+pr_out23 = princomp(freedom_pca3, cor = FALSE, scores = TRUE)
+# first two principal components
+comp23 <- as.data.frame(pr_out23$scores[, 1:2])
+```
+
+To determine the number of cluster we calculate the within variance for every k from 2 to 15, and then visualize the results in order to choose an appropriate number of clusters that minimize the variance within clusters.
+
+```{r, warning = FALSE, fig.height = 4}
+# Determine number of clusters for 2008 subset
+wss1 <- (nrow(freedom_pca) - 1) * sum(apply(freedom_pca,  2, var))
+for (i in 2:15) wss1[i] <- sum(kmeans(freedom_pca, centers = i)$withinss)
+
+# Determine number of clusters for 2012 subset
+wss2 <- (nrow(freedom_pca2) - 1) * sum(apply(freedom_pca2, 2, var))
+for (i in 2:15) wss2[i] <- sum(kmeans(freedom_pca2, centers = i)$withinss)
+
+# Determine number of clusters for 2016 subset
+wss3 <- (nrow(freedom_pca3) - 1) * sum(apply(freedom_pca3, 2, var))
+for (i in 2:15) wss3[i] <- sum(kmeans(freedom_pca3, centers = i)$withinss)
+
+d <- data.frame("n"    = c(rep(1:15,   3)), 
+                "name" = c(rep("2008", 15),
+                           rep("2012", 15),
+                           rep("2016", 15)),
+                "wss"  = c(wss1, wss2, wss3))
+
+plot_ly(data    = d,
+        x       = ~n,
+        y       = ~wss,
+        color   = ~name,
+        type    = "scatter",
+        mode    = "lines+markers")%>%
+  layout(title  = 'Within cluster sum of squares',
+         xaxis  = list(title = "Number of clusters"),
+         yaxis  = list(title = "Within groups sum of squares"),
+         legend = list(orientation = 'h')
+         )
+```
+
+Then we compute the k-means clustering for the three subset of data.
+
+```{r, warning = FALSE}
+set.seed(1)
+# Apply k-means with k=6
+# 2008 subset
+k1 <- kmeans(comp2,  6, nstart=25, iter.max=1000)
+# 2012 subset
+k2 <- kmeans(comp22, 6, nstart=25, iter.max=1000)
+# 2016 subset
+k3 <- kmeans(comp23, 6, nstart=25, iter.max=1000)
+```
+
+Here we provide the plots of the distributions of the clusters on the first two principal components. 
+As far as concerned the clusters of the 2008 subset, some considerations can be done. 
+The clusters have a number of countries that range from 10 to 42, with the greater of them centered in the positive half of the first principal component.
+The first loading vector place most of its weight on pf_identity and pf_movement. We can say that, according to their position, the clusters in the right half of the plot have countries with high levels of personal freedom related to movement and identity.
+
+```{r, warning = FALSE}
+palette(alpha(brewer.pal(9, 'Set1'), 0.5))
+
+# first cluster
+#k1$centers
+#k1$size
+plot(comp2,  col = k1$clust, pch = 16, main = "K-means for 2008")
+```
+
+The subset of 2012 have clusters with a number of countries that range from 8 to 44. 
+pf_identity and pf_movement are the two variables in which the first loading vector place most of the weight, while pf_identity and pf_rol are the ones of the second loading vector. 
+Using the command k2$centers is it possible to have a good indicator of the position of the subgroups. Cluster n 4 for example is centered on a low level on the axis of the first principal component, and this indicates that it has probably low values of pf_identity adn pf_movement. 
+
+```{r, warning = FALSE}
+palette(alpha(brewer.pal(9, 'Set1'), 0.5))
+
+# second cluster
+#k2$centers
+#k2$size
+plot(comp22, col = k2$clust, pch = 16, main = "K-means for 2012")
+```
+
+Data of 2016 shows quite different subgroups from the previous years. All the clusters slipped to the right, indicating a shift towards higher levels of pf_identity and pf_movement, as suggested by the first loading vector. The clusters lay in a range of 8 to 40 observations within them.
+
+```{r, warning = FALSE}
+palette(alpha(brewer.pal(9, 'Set1'), 0.5))
+
+# third cluster
+#k3$centers
+#k3$size
+plot(comp23, col = k3$clust, pch = 16, main = "K-means for 2016")
+```
+
+Another interesting way of clustering data is according to the level of human freedom score, considered in its component of economic freedom and personal freedom.
+
+As for the previuos cluster analysis we decided to split data by year and to consider only 2008, 2012 and 2016.
+
+The plot of the within-cluster sum of square has to be inspected in order to decide the number of k to choose to better represent the data, minimizing the internal variance of the clusters.
+
+```{r, warning = FALSE, fig.height = 4}
+set.seed(1)
+# k-means for hf_score
+
+#2008
+hf_cluster1 <- originalData[originalData$year == 2008,]
+hf_cluster1 <- subset(hf_cluster1, select = c("ef_score","pf_score"))
+
+wss1 <- (nrow(hf_cluster1)-1)*sum(apply(hf_cluster1,2,var))
+for (i in 2:15) wss1[i] <- sum(kmeans(hf_cluster1, centers=i)$withinss)
+
+#2012
+hf_cluster2 <- originalData[originalData$year == 2012,]
+hf_cluster2 <- subset(hf_cluster2, select = c("ef_score","pf_score"))
+
+wss2 <- (nrow(hf_cluster2)-1)*sum(apply(hf_cluster2,2,var))
+for (i in 2:15) wss2[i] <- sum(kmeans(hf_cluster2, centers=i)$withinss)
+
+#2016
+hf_cluster3 <- originalData[originalData$year == 2016,]
+hf_cluster3 <- subset(hf_cluster3, select = c("ef_score","pf_score"))
+
+wss3 <- (nrow(hf_cluster3)-1)*sum(apply(hf_cluster3,2,var))
+for (i in 2:15) wss3[i] <- sum(kmeans(hf_cluster3, centers=i)$withinss)
+
+
+d <- data.frame("n"    = c(rep(1:15,   3)), 
+                "name" = c(rep("2008", 15),
+                           rep("2012", 15),
+                           rep("2016", 15)),
+                "wss"  = c(wss1, wss2, wss3))
+
+plot_ly(data    = d,
+        x       = ~n,
+        y       = ~wss,
+        color   = ~name,
+        type    = "scatter",
+        mode    = "lines+markers")%>%
+  layout(title  = 'Within cluster sum of squares',
+         xaxis  = list(title = "Number of clusters"),
+         yaxis  = list(title = "Within groups sum of squares"),
+         legend = list(orientation = 'h')
+         )
+```
+
+K = 8 seems an adequate compromise to reduce the within-cluster sum of square mantaining at the same time a good level of interpretability.
+
+```{r, warning = FALSE}
+# 2008
+kk1 <- kmeans(hf_cluster1, 8, nstart=25, iter.max=1000)
+
+palette(alpha(brewer.pal(9,'Set1'), 0.5))
+plot(hf_cluster1, col=kk1$clust, pch=16, main = "K-means for 2008")
+
+#2012
+kk2 <- kmeans(hf_cluster2, 8, nstart=25, iter.max=1000)
+
+palette(alpha(brewer.pal(9,'Set1'), 0.5))
+plot(hf_cluster2, col=kk2$clust, pch=16, main = "K-means for 2012")
+
+#2016
+kk3 <- kmeans(hf_cluster3, 8, nstart=25, iter.max=1000)
+
+palette(alpha(brewer.pal(9,'Set1'), 0.5))
+plot(hf_cluster3, col=kk3$clust, pch=16, main = "K-means for 2016")
+```
+
+This second cluster analysis is of easier interpretation.
+It can be seen that the distribution of the points move to up and right during years, meaning that the overall level of freedom of the countries increases.
+As far as concerned the clustering, clear distinctions of the countries within the different clusters can be made. Over the years, it increases the number of countries inserted in the clusters positioned in the higher part of the plot (meaning that they have high levels of human freedom score). On the other hand, the two clusters characterized by lower levels of human freedom score present respectively 2 and 4 observation inside them on 2016.
+
+## *Hierarchical clustering*
+
+Hierarchical clustering is another widely used method to discover subgroups among variables. 
+The main difference from the k-means clustering is that with this method it is not needed to specify k at the beginning of the analysis. Hierarchical clustering compute all the possible clusters into which data can be divided, and plot them into a dendrogram. By looking at this kind of reversed tree, the optimal number of cluster can be chosen.
+A potential drawback is that it can be computationally costly, much more than the k-means method. In the case of the freedom index dataset the low dimensions permit us to perform this method quite easily.
+
+The hierarchical clustering can be performed in many different way, according to the type of linkage used to compute the clusters. We decided to try some of them and compare the results.
+Moreover, it is possible to use different dissimilarity measures to compute the distances between points. In the following analysis it has been used the Euclidean distance.
+
+As for the previous cluster analysis we decided to split data by year and to consider only 2008, 2012 and 2016.
+
+```{r, warning = FALSE}
+# subset of 2008
+data <- originalData
+freedom_den1 <- data[data$year == 2008, ]
+freedom_den1 <- subset(freedom_den1, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+# subset of 2012
+data <- originalData
+freedom_den2 <- data[data$year == 2012, ]
+freedom_den2 <- subset(freedom_den2, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+# subset of 2016
+data <- originalData
+freedom_den3 <- data[data$year == 2016, ]
+freedom_den3 <- subset(freedom_den3, select = c("pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+```
+
+Let's plot the three dendrogram to evaluate the results for the 2008 subset.
+As can be noticed in the figures below, the dendrogram generated by the single linkage tend to be less balanced compared to the others.
+As far as concerned the average linkage, even if it is definitely more balanced than the single linkage one, it present a considerable number of splittings at high height that results in small branches of one observation.
+After an accurate visual inspection of the complete linkage dendrogram we decided to cut it at height = 10, resulting in 6 clusters.
+
+```{r, warning = FALSE}
+
+set.seed(1)
+
+hc_complete1 = hclust(dist(freedom_den1), method = "complete")
+hc_average1  = hclust(dist(freedom_den1), method = "average")
+hc_single1   = hclust(dist(freedom_den1), method = "single")
+
+par(mfrow=c(1,3))
+
+plot(hc_complete1, main = "Complete Linkage", xlab="", ylab="", sub="")
+plot(hc_average1,  main = "Average Linkage",  xlab="", ylab="", sub="")
+plot(hc_single1,   main = "Single Linkage",   xlab="", ylab="", sub="")
+```
+
+The same type of consideratons has to be done for both the 2012 subset and 2016 subset. We excluded the single linkage hierarchical dendrogram due to its characteristical unbalanced conformation.
+As can be seen in the following plots, the more equilibrated both for the data of 2012 and for 2016 is the complete linkage cluster.
+
+```{r, warning = FALSE}
+set.seed(1)
+
+hc_complete2 = hclust(dist(freedom_den2), method = "complete")
+hc_average2 = hclust(dist(freedom_den2), method = "average")
+hc_complete3 = hclust(dist(freedom_den3), method = "complete")
+hc_average3 = hclust(dist(freedom_den3), method = "average")
+
+par(mfrow=c(1,4))
+
+plot(hc_complete2, main = "Complete Linkage 2012", xlab="", ylab="", sub="")
+plot(hc_average2, main = "Average Linkage 2012", xlab="", ylab="", sub="")
+plot(hc_complete3, main = "Complete Linkage 2016", xlab="", ylab="", sub="")
+plot(hc_average3, main = "Average Linkage 2016", xlab="", ylab="", sub="")
+```
+
+After a careful inspection of the dendrograms, we decided to cut both dendrograms at height 10-11 to form 6 clusters.
+In the three plot coming from the hierarchical clustering, it is possible to see the same trend of the previous clustering analysis is found. During years, in fact, all clusters tend to move right-up indicating better scores of human freedom.
+
+```{r}
+
+# 2008
+data <- originalData
+freedom_d1 <- data[data$year == 2008,]
+freedom_d1 <- subset(freedom_d1, select = c("ef_score", "pf_score", "countries", "region", "pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+# cut the dendrogram
+dendrogram1 <- cutree(hc_complete1,6)
+freedom_den1$dendrogram1 <- dendrogram1
+
+# plot of resulting clusters
+ggplot(data = freedom_d1) +
+  aes(x = ef_score, y = pf_score, color = dendrogram1) +
+  geom_point() +
+  scale_color_distiller(palette = "Set1") +
+  theme_minimal()+
+  labs(title = "2008", 
+       x = "Economic freedom score", 
+       y = "Personal freedom score")
+
+
+# 2012
+data <- originalData
+freedom_d2 <- data[data$year == 2012,]
+freedom_d2 <- subset(freedom_d2, select = c("ef_score", "pf_score", "countries", "region", "pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+# cut the dendrogram
+dendrogram2 <- cutree(hc_complete2,6)
+freedom_den2$dendrogram2 <- dendrogram2
+
+# plot of resulting clusters
+ggplot(data = freedom_d2) +
+  aes(x = ef_score, y = pf_score, color = dendrogram2) +
+  geom_point() +
+  scale_color_distiller(palette = "Set1") +
+  theme_minimal()+
+  labs(title = "2012", 
+       x = "Economic freedom score", 
+       y = "Personal freedom score")
+
+
+# 2016
+data <- originalData
+freedom_d3 <- data[data$year == 2016,]
+freedom_d3 <- subset(freedom_d3, select = c("ef_score", "pf_score", "countries", "region", "pf_rol", "pf_ss", "pf_movement", "pf_religion", "pf_expression", "pf_identity", "ef_government", "ef_legal", "ef_money", "ef_trade", "ef_regulation" ))
+
+# cut the dendrogram
+dendrogram3 <- cutree(hc_complete3,6)
+freedom_den3$dendrogram3 <- dendrogram3
+
+# plot of resulting clusters
+ggplot(data = freedom_d3) +
+  aes(x = ef_score, y = pf_score, color = dendrogram3) +
+  geom_point() +
+  scale_color_distiller(palette = "Set1") +
+  theme_minimal()+
+  labs(title = "2016", 
+       x = "Economic freedom score", 
+       y = "Personal freedom score")
+```
+
+# *Conclusions*
+
+To sum up briefly our work, we firstly approached the dataset in order to gain information in full measure on its structure and on its main characteristics. We performed a deep explorative analysis using as many data visualization tools as possible to ensure a good understanding. We performed principal component analysis to visualize the entire dataset.
+Then we moved to the main analysis process, focusing on classification. KNN, K-means and hierarchical clustering were performed. Some interesting insights came out of them, as mentioned above.
+
+Make this kind of analysis is extremely important to have a better understanding of social phenomena that affect our world and to take informed decisions.
+
